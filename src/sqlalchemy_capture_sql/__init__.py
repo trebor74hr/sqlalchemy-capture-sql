@@ -1,20 +1,4 @@
 """
-Usage: Example using factory-boy classes
-Python 3.7 tested and developed.
-
-with with:
-
-    with CaptureSqlStatements(engine_cloud) as capture_stmts:
-        cpm = FactoryModel.create()
-    capture_stmts.pp(short=True)
-
-standard style:
-
-    capture_stmts = CaptureSqlStatements(engine_cloud)
-    cpm = FactoryModel.create()
-    capture_stmts.finish()
-    capture_stmts.pp(short=True)
-
 TODO: provide some better examples with plain old sql-s w/wo ORM 
 
 """
@@ -117,6 +101,10 @@ class CaptureSqlStatements:
       
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.finish()
+
+    def __iter__(self):
+        for stmt in self.statements:
+            yield stmt
 
     def capture_sa_statement_listener(self, conn, cursor, statement, parameters, context, executemany):
         assert not self.finished
