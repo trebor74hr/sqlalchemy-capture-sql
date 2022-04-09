@@ -10,14 +10,26 @@ control nr.  and type of sql statements executed for monitored case.
 
 This library provides simple class that enables similar behaviour, but for
 [SQLAlchemy](https://www.sqlalchemy.org/). Each SQL statement is captured along
-with passed parameters. Internally it uses 
+with passed parameters. 
+
+## How it works
+Internally it uses 
 [event.listens_for(engine, 'before_cursor_execute'](https://docs.sqlalchemy.org/en/13/core/events.html?highlight=before_cursor_execute#sqlalchemy.events.ConnectionEvents.before_cursor_execute)
 event handler, e.g.:
 
     @event.listens_for(engine, 'before_cursor_execute')
     def capture_sa_statement_listener(...)
 
-REMARKS: 
+It simply collects all sql statements sent to event listeer by SQLAlchemy (sent
+just before execution) and statements are collected in CaptureSqlStatements
+instance until .finish() method is called (or with ctx is exited).
+
+Additionally it provides time measurement (see REMARKS), stats and formatting
+functions, see Examples.
+
+## REMARKS
+
+Some remarks:
 
  * There is some "heuristic" duration measurement, i.e. class measures time
    between 2 captures, it is not actual DB execution time.
@@ -29,10 +41,18 @@ REMARKS:
 Tested and developed on Python 3.7+SQLAlchemy 1.3, but I assume it should work
 on later and probably some previous versions.
 
-Some very simple examples using factory-boy classes, more to come.
+## Installation
+As usual:
+
+    pip install sqlalchemy-capture-sql
+
+## Example usage
+
+Some very simple examples using [factory-boy classes](https://factoryboy.readthedocs.io/en/stable/index.html), **more to come**.
 
 with **with** python statement:
 
+    from CaptureSqlStatements
     with CaptureSqlStatements(engine_cloud) as capture_stmts:
         # put here any calls that issue sqlalchemy commands that produce some
         # sql statements execution.
@@ -95,6 +115,78 @@ One can iterate all statements:
         print(statement.first_table) # BEWARE: do not rely on this
  
 <!--
-pip install markdown
-python -m markdown README.md  > r.html && open r.html
+
+test markdown:
+
+    pip install markdown
+    python -m markdown README.md  > r.html && open r.html
+
+markdown syntax: 
+
+    https://www.markdownguide.org/basic-syntax/
+
+Deployment:
+
+Initially:
+
+    pip install wheel
+    py -m pip install --upgrade build
+
+    pip install twine # installs a bunch of thing
+    # bleach-5.0.0 commonmark-0.9.1 docutils-0.18.1 keyring-23.5.0 pkginfo-1.8.2
+    # readme-renderer-34.0 requests-toolbelt-0.9.1 rich-12.2.0 twine-4.0.0
+    # webencodings-0.5.1
+
+    rm -Rf dist/* 
+
+    # build and deploy
+    py -m build
+
+    # deploy on test pypi
+    py -m twine upload --repository testpypi dist/* --verbose
+
+    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    # if ok then install on pypi 
+    py -m twine upload dist/* --verbose
+
+    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    git commit && git push
+
+Upgrade version:
+
+    rm -Rf dist/* 
+
+    # increase version number in setup.cfg
+    # if not done, then upload to pypi will report:
+    #    400 File already exists. See https://pypi.org/help/#file-name-reuse
+    #    for more information.
+
+    py -m twine upload --repository testpypi dist/* --verbose
+
+    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    # if ok then upload on pypi
+    py -m twine upload dist/* --verbose
+
+
+    # if ok then install on pypi
+    py -m twine upload --skip-existing dist/*
+
+    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    git commit && git push
+
+Shortcut:
+
+    rm -Rf dist/* && py -m build && py -m twine upload dist/* --verbose
+
+test:
+    create venv or init existing one
+    pip uninstall sqlalchemy-capture-sql
+    pip install sqlalchemy-capture-sql==0.1.1
+
+    python -c"from sqlalchemy_capture_sql import CaptureSqlStatements"
+
 -->
