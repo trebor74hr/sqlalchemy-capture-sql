@@ -52,21 +52,28 @@ Some very simple examples using [factory-boy classes](https://factoryboy.readthe
 
 with **with** python statement:
 
-    from CaptureSqlStatements
+    from sqlalchemy_capture_sql import CaptureSqlStatements
+
     with CaptureSqlStatements(engine_cloud) as capture_stmts:
-        # put here any calls that issue sqlalchemy commands that produce some
-        # sql statements execution.
+
+        # put here calls to functions that issue sqlalchemy commands that
+        # produce some sql statements execution, for example factory-boy:
         cpm = FactoryModel.create()
-        # no .finish() needed
+
+        # call to .finish() automatically done on with ctx exit
     capture_stmts.pp(short=True)
 
 standard style:
 
     capture_stmts = CaptureSqlStatements(engine_cloud)
-    # put here any calls that issue sqlalchemy commands that produce some
-    # sql statements execution.
+
+    # put here calls to functions that issue sqlalchemy commands that
+    # produce some sql statements execution, for example factory-boy:
     cpm = FactoryModel.create()
+
+    # in this case .finish() needs to be called to stop capturing
     capture_stmts.finish()
+
     capture_stmts.pp(short=True)
 
 
