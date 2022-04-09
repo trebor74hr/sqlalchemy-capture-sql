@@ -94,19 +94,19 @@ Both cases produces same result, it could look like this:
          <- '4+3'
 
     -- By sql command:
-        SELECT      3
-        INSERT      2
+        SELECT  3
+        INSERT  2
 
     -- By table (top 20):
-        PERSON                    2
-        COMPANY_ACCESS      2
-        COMPANY_PERSON            1
+        PERSON          2
+        COMPANY_ACCESS  2
+        COMPANY_PERSON  1
 
     -- By sql command + table (top 20):
-        SELECT PERSON                    2
-        INSERT COMPANY_ACCESS      1
-        SELECT COMPANY_ACCESS      1
-        INSERT COMPANY_PERSON            1
+        SELECT PERSON          2
+        INSERT COMPANY_ACCESS  1
+        SELECT COMPANY_ACCESS  1
+        INSERT COMPANY_PERSON  1
 
 One can iterate all statements:
 
@@ -123,6 +123,7 @@ One can iterate all statements:
  
 <!--
 
+
 test markdown:
 
     pip install markdown
@@ -133,6 +134,8 @@ markdown syntax:
     https://www.markdownguide.org/basic-syntax/
 
 Deployment:
+    reference:
+        https://towardsdatascience.com/5-simple-steps-to-package-and-publish-your-python-code-to-pypi-d9f5c43f9d4
 
 Initially:
 
