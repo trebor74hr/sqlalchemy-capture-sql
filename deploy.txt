@@ -47,6 +47,10 @@ Upgrade version:
     #    400 File already exists. See https://pypi.org/help/#file-name-reuse
     #    for more information.
 
+    # build and deploy
+    py -m build
+
+    # if want to test how it will look on test pi
     py -m twine upload --repository testpypi dist/* --verbose
 
     # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
@@ -54,9 +58,8 @@ Upgrade version:
     # if ok then upload on pypi
     py -m twine upload dist/* --verbose
 
-
-    # if ok then install on pypi
-    py -m twine upload --skip-existing dist/*
+    # # if ok then install on pypi
+    # py -m twine upload --skip-existing dist/*
 
     # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
 
