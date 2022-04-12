@@ -91,9 +91,12 @@ class Stat:
     key: str
     cnt: int
     duration: float
+    statement: Optional[SqlStatement] = None
 
 # ------------------------------------------------------------
 TOP_DEFAULT = 20
+TOP_DEFAULT_SLOWEST = 5
+TAB = " " * 4
 # ------------------------------------------------------------
 
 @dataclass
@@ -106,6 +109,8 @@ class CaptureSqlStatements:
     decorated_fn : Callable = field(init=False)
 
     AGG_FIELDS = ("cnt", "duration")
+    FMT_MAP    = {"cnt": "%3d", "duration" : "%7.3f s"}
+
 
     def __post_init__(self):
         # https://docs.sqlalchemy.org/en/13/orm/session_events.html - nema listano, već ovdje (našao u source-u da se zovu)
@@ -132,6 +137,10 @@ class CaptureSqlStatements:
                 pass
 
         return self
+
+    # ------------------------------------------------------------
+    # Capture logic implemenntation 
+    # ------------------------------------------------------------
 
     def __enter__(self):
         return self
@@ -178,8 +187,31 @@ class CaptureSqlStatements:
                                   (stmt.idx, stmt.duration, stmt.first_table, stmt.sql_type))
             self._con.commit()
 
+    # ---------------------------------------------------------------------
+    # Stats methods - returning aggregated or top records as list or dict
+    # ---------------------------------------------------------------------
+
     def count(self) -> int:
         return len(self.statements)
+
+    def get_slowest(self, top=TOP_DEFAULT_SLOWEST):
+        if not self.finished:
+            raise Exception("Call finish() first.")
+
+        self._cur.execute(f"select id, sql_type, first_table, duration from sql_statement order by duration desc limit {top}")
+        max_key_len = 15
+        stats = []
+        for row in self._cur.fetchall():
+            idx, sql_type, first_table, duration = row
+            key = f"{sql_type} {first_table}"
+            max_key_len = max([max_key_len, len(key)])
+            stmt = self.statements[idx-1]
+            stats.append(Stat(key, 1, duration, stmt))
+        return max_key_len, stats
+
+    def get_counts(self, name):
+        return {st.key: st.cnt for st in self.get_stats(name)[1]}
+
 
     def get_stats(self, name, top=TOP_DEFAULT):
         if not self.finished:
@@ -196,7 +228,7 @@ class CaptureSqlStatements:
 
         group_by = name_map[name]
 
-        self._cur.execute(f"select count(*) cnt, sum(duration) dur, {group_by} from sql_statement group by {group_by} order by sum(duration) desc, count(*) desc")
+        self._cur.execute(f"select count(*) cnt, sum(duration) dur, {group_by} from sql_statement group by {group_by} order by sum(duration) desc, count(*) desc limit {top}")
 
         max_key_len = 15
         stats = []
@@ -207,39 +239,63 @@ class CaptureSqlStatements:
             stats.append(Stat(key, cnt, duration))
         return max_key_len, stats
 
-    def get_counts(self, name):
-        return {st.key: st.cnt for st in self.get_stats(name)[1]}
+    # ----------------------------------------------------------------------
+    # Report methods - using stats method produce report as single string
+    # ----------------------------------------------------------------------
+
+    def report_slowest(self, verbose=False):
+        max_key_len, slowest_stmts = self.get_slowest(top=5)
+        fmt = "%%3d. %%-%ds %s %s %%s" % (max_key_len+3, self.FMT_MAP["cnt"], self.FMT_MAP["duration"])
+        out = []
+        for nr, stat in enumerate(slowest_stmts,1):
+            out.append(fmt % (nr, stat.key, stat.cnt, stat.duration, stat.statement.stmt_repr if not verbose else stat.statement))
+        return f"\n{TAB}".join(out)
 
     def report_counter(self, name, top=TOP_DEFAULT):
         return self.report_stats(name, fields=["cnt"], top=top)
 
     def report_stats(self, name, top=TOP_DEFAULT, fields=AGG_FIELDS):
-        fmt_map = {"cnt": "%3d", "duration" : "%7.3f s"}
         max_key_len, stats = self.get_stats(name)
-        fmt = "%%-%ds " % (max_key_len+3,) + " ".join([fmt_map[fld] for fld in fields])
-        return "\n    ".join([fmt % (st.key, *[getattr(st, fld) for fld in fields]) for st in stats])
+        fmt = "%%-%ds " % (max_key_len+3,) + " ".join([self.FMT_MAP[fld] for fld in fields])
+        return f"\n{TAB}".join([fmt % (st.key, *[getattr(st, fld) for fld in fields]) for st in stats])
+
+    # ----------------------------------------------------------------------
+    # Pretty-print method - full report to std. out or custom print function
+    # ----------------------------------------------------------------------
 
     def pp(self, verbose=False, print_cmd=print):
         if self.statements:
+            separator_line = "=" * 60
             top = TOP_DEFAULT
+            print_cmd(separator_line)
             print_cmd(f"== NOTE: duration measures time between 2 captures, it is not actual DB execution time.")
-            print_cmd(f"== Totally captured {self.count()} statement(s) in {self.duration} s:")
+            total = f"== Totally captured {self.count()} statement(s) in {self.duration} s"
+            print_cmd(total+":")
             for nr, stmt in enumerate(self.statements, 1):
                 print_cmd("%3d. %s" % (nr, stmt.report_short() if not verbose else stmt))
-            print_cmd("-- By sql command:")
-            print_cmd(f"    {self.report_stats('by_type')}")
-            print_cmd(f"-- By table (top {top}):")
-            print_cmd(f"    {self.report_stats('by_table')}")
-            print_cmd(f"-- By sql command + table (top {top}):")
-            print_cmd(f"    {self.report_stats('by_type_and_table')}")
+            print_cmd(separator_line)
+            print_cmd(f"== Slowest (top {TOP_DEFAULT_SLOWEST}):")
+            print_cmd(f"{TAB}{self.report_slowest(verbose=verbose)}")
+            print_cmd(separator_line)
+            print_cmd(f"== By sql command (top {top}):")
+            print_cmd(f"{TAB}{self.report_stats('by_type')}")
+            print_cmd(separator_line)
+            print_cmd(f"== By table (top {top}):")
+            print_cmd(f"{TAB}{self.report_stats('by_table')}")
+            print_cmd(separator_line)
+            print_cmd(f"== By sql command + table (top {top}):")
+            print_cmd(f"{TAB}{self.report_stats('by_type_and_table')}")
+            print_cmd(separator_line)
+            print_cmd(total)
         else:
             print_cmd("No sql statements captured")
+
+    # ------------------------------------------------------------
+    # Utility functions
+    # ------------------------------------------------------------
 
     @staticmethod
     def enable_sqlalchemy_debug_stmts():
         logging.basicConfig()
         logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO) 
-
-
-
 

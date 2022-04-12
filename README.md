@@ -161,6 +161,7 @@ Call to pp():
 
 produces:
 
+    ============================================================
     == NOTE: duration measures time between 2 captures, it is not actual DB execution time.
     == Totally captured 8 statement(s) in 0.008866 s:
       1. 0.0020 INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)
@@ -177,22 +178,41 @@ produces:
          <- '3'
       8. 0.0005 DELETE FROM users WHERE users.id = ?
          <- '3'
-    -- By sql command:
+
+    ============================================================
+    == Slowest (top 5):
+          1. INSERT USERS             1   0.002 s INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)
+          2. INSERT USERS             1   0.001 s INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)
+          3. UPDATE USERS             1   0.001 s UPDATE users SET nickname=? WHERE users.id = ?
+          4. SELECT 'IN-CAPTURE'      1   0.001 s select 'In-capture'
+          5. SELECT USERS             1   0.001 s SELECT FROM users
+    WHERE users.id = ?
+
+    ============================================================
+    == By sql command (top 20):
         INSERT               2   0.003 s
         SELECT               4   0.003 s
         UPDATE               1   0.001 s
         DELETE               1   0.001 s
-    -- By table (top 20):
+
+    ============================================================
+    == By table (top 20):
         USERS                6   0.007 s
         'IN-CAPTURE'         1   0.001 s
         (SELECT              1   0.000 s
-    -- By sql command + table (top 20):
+
+    ============================================================
+    == By sql command + table (top 20):
         INSERT USERS             2   0.003 s
         SELECT USERS             2   0.002 s
         UPDATE USERS             1   0.001 s
         SELECT 'IN-CAPTURE'      1   0.001 s
         DELETE USERS             1   0.001 s
         SELECT (SELECT           1   0.000 s
+
+    ============================================================
+    == Totally captured 8 statement(s) in 0.008866 s
+
 
 One can iterate all statements:
 

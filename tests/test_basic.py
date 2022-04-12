@@ -149,6 +149,8 @@ class TestTables(TestBase):
             capture_stmts.report_stats(name, fields=["duration"])
             capture_stmts.report_stats(name, fields=["cnt"])
 
+        capture_stmts.report_slowest()
+
         capture_stmts.pp(verbose=False, print_cmd=dummy_print)
         capture_stmts.pp(verbose=True, print_cmd=dummy_print)
 
