@@ -48,13 +48,11 @@ As usual:
 
 ## Example usage
 
-Some very simple examples using [factory-boy classes](https://factoryboy.readthedocs.io/en/stable/index.html), **more to come**.
-
-with **with** python statement:
+With python's **with** statement:
 
     from sqlalchemy_capture_sql import CaptureSqlStatements
 
-    with CaptureSqlStatements(engine_cloud) as capture_stmts:
+    with CaptureSqlStatements(sqlalchemy_engine) as capture_stmts:
 
         # put here calls to functions that issue sqlalchemy commands that
         # produce some sql statements execution, for example factory-boy:
@@ -65,7 +63,7 @@ with **with** python statement:
 
 standard style:
 
-    capture_stmts = CaptureSqlStatements(engine_cloud)
+    capture_stmts = CaptureSqlStatements(sqlalchemy_engine)
 
     # put here calls to functions that issue sqlalchemy commands that
     # produce some sql statements execution, for example factory-boy:
@@ -77,36 +75,124 @@ standard style:
     capture_stmts.pp(short=True)
 
 
-Both cases produces same result, it could look like this:
+Example:
+
+    from sqlalchemy_capture_sql import CaptureSqlStatements
+    from sqlalchemy import create_engine, text, Column, Integer, String
+    from sqlalchemy.ext.declarative import declarative_base
+    from sqlalchemy.orm import sessionmaker
+
+    Base = declarative_base()
+
+    class User(Base):
+        __tablename__ = 'users'
+
+        id = Column(Integer, primary_key=True)
+        name = Column(String)
+        fullname = Column(String)
+        nickname = Column(String)
+
+
+    engine = create_engine('sqlite:///:memory:', echo=False)
+    conn = engine.connect()
+
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    session = Session()
+
+    user1 = User(name='ed', fullname='Ed Jones', nickname='edsnickname')
+
+    session.add(user1)
+    session.commit()
+
+    with CaptureSqlStatements(engine) as capture_stmts:
+        joe = User(name='joe', fullname='Joe Joey', nickname='joey')
+        session.add(joe)
+        session.commit()
+
+        session.query(User).count()
+
+        # one raw sql
+        conn.execute(text("select 'In-capture'")).fetchall()
+
+        joe.nickname = "Jo"
+        session.commit()
+
+        session.add(User(name='Wrong', fullname='Wrong', nickname='wrong'))
+        session.rollback()
+
+        jack = User(name='Jack', fullname='Jackson', nickname='jackie')
+        session.add(jack)
+        session.commit()
+
+        session.delete(jack)
+        session.commit()
+
+    session.add(User(name='Mick', fullname='Michael', nickname='mick'))
+    assert session.query(User).count(), 3
+
+    assert capture_stmts.get_counts("by_type"), {'INSERT': 2, 'SELECT': 4, 'UPDATE': 1, 'DELETE': 1}
+    assert capture_stmts.get_counts("by_table"), {"'IN-CAPTURE'": 1, '(SELECT': 1, 'USERS': 6}
+    assert capture_stmts.get_counts("by_type_and_table"), {
+        'DELETE USERS': 1,
+        'INSERT USERS': 2,
+        "SELECT 'IN-CAPTURE'": 1,
+        'SELECT (SELECT': 1,
+        'SELECT USERS': 2,
+        'UPDATE USERS': 1}
+
+    assert [st.stmt_repr for st in capture_stmts.statements], [
+        'INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)',
+        'SELECT FROM (SELECT users.id AS users_id, users.name AS users_name, '
+            'users.fullname AS users_fullname, users.nickname AS users_nickname \n'
+            'FROM users) AS anon_1',
+        "select 'In-capture'",
+        'SELECT FROM users \nWHERE users.id = ?',
+        'UPDATE users SET nickname=? WHERE users.id = ?',
+        'INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)',
+        'SELECT FROM users \nWHERE users.id = ?',
+        'DELETE FROM users WHERE users.id = ?']
+
+
+Call to pp():
+
+    capture_stmts.pp()
+
+produces:
 
     == NOTE: duration measures time between 2 captures, it is not actual DB execution time.
-
-    == Totally captured 5 statement(s):
-
-      1. 0.00 SELECT FROM person ORDER BY person.id DESC
-      2. 0.00 INSERT INTO company_access (alive, allow_empty_cashbag,
-         <- 'True+True+False+True+True+False+False+False+False+False+False+False+T
-      3. 0.00 SELECT FROM person  WHERE person.id = %(param_1)s
-         <- '4'
-      4. 0.00 SELECT FROM company_access  WHERE company...
+    == Totally captured 8 statement(s) in 0.008866 s:
+      1. 0.0020 INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)
+         <- 'joe+Joe Joey+joey'
+      2. 0.0005 SELECT FROM (SELECT users.id AS users_id, users.name AS users_name, us
+      3. 0.0010 select 'In-capture'
+      4. 0.0009 SELECT FROM users  WHERE users.id = ?
+         <- '2'
+      5. 0.0013 UPDATE users SET nickname=? WHERE users.id = ?
+         <- 'Jo+2'
+      6. 0.0014 INSERT INTO users (name, fullname, nickname) VALUES (?, ?, ?)
+         <- 'Jack+Jackson+jackie'
+      7. 0.0007 SELECT FROM users  WHERE users.id = ?
          <- '3'
-      5. 0.01 INSERT INTO company_person (packing_model_id, company_access_i
-         <- '4+3'
-
+      8. 0.0005 DELETE FROM users WHERE users.id = ?
+         <- '3'
     -- By sql command:
-        SELECT  3
-        INSERT  2
-
+        INSERT               2   0.003 s
+        SELECT               4   0.003 s
+        UPDATE               1   0.001 s
+        DELETE               1   0.001 s
     -- By table (top 20):
-        PERSON          2
-        COMPANY_ACCESS  2
-        COMPANY_PERSON  1
-
+        USERS                6   0.007 s
+        'IN-CAPTURE'         1   0.001 s
+        (SELECT              1   0.000 s
     -- By sql command + table (top 20):
-        SELECT PERSON          2
-        INSERT COMPANY_ACCESS  1
-        SELECT COMPANY_ACCESS  1
-        INSERT COMPANY_PERSON  1
+        INSERT USERS             2   0.003 s
+        SELECT USERS             2   0.002 s
+        UPDATE USERS             1   0.001 s
+        SELECT 'IN-CAPTURE'      1   0.001 s
+        DELETE USERS             1   0.001 s
+        SELECT (SELECT           1   0.000 s
 
 One can iterate all statements:
 
@@ -120,83 +206,3 @@ One can iterate all statements:
         print(statement.executemany) # bool
         print(statement.sql_type)    # BEWARE: do not rely on this
         print(statement.first_table) # BEWARE: do not rely on this
- 
-<!--
-
-
-test markdown:
-
-    pip install markdown
-    python -m markdown README.md  > r.html && open r.html
-
-markdown syntax: 
-
-    https://www.markdownguide.org/basic-syntax/
-
-Deployment:
-    reference:
-        https://towardsdatascience.com/5-simple-steps-to-package-and-publish-your-python-code-to-pypi-d9f5c43f9d4
-
-Initially:
-
-    pip install wheel
-    py -m pip install --upgrade build
-
-    pip install twine # installs a bunch of thing
-    # bleach-5.0.0 commonmark-0.9.1 docutils-0.18.1 keyring-23.5.0 pkginfo-1.8.2
-    # readme-renderer-34.0 requests-toolbelt-0.9.1 rich-12.2.0 twine-4.0.0
-    # webencodings-0.5.1
-
-    rm -Rf dist/* 
-
-    # build and deploy
-    py -m build
-
-    # deploy on test pypi
-    py -m twine upload --repository testpypi dist/* --verbose
-
-    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
-
-    # if ok then install on pypi 
-    py -m twine upload dist/* --verbose
-
-    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
-
-    git commit && git push
-
-Upgrade version:
-
-    rm -Rf dist/* 
-
-    # increase version number in setup.cfg
-    # if not done, then upload to pypi will report:
-    #    400 File already exists. See https://pypi.org/help/#file-name-reuse
-    #    for more information.
-
-    py -m twine upload --repository testpypi dist/* --verbose
-
-    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
-
-    # if ok then upload on pypi
-    py -m twine upload dist/* --verbose
-
-
-    # if ok then install on pypi
-    py -m twine upload --skip-existing dist/*
-
-    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
-
-    git commit && git push
-
-Shortcut:
-
-    rm -Rf dist/* && py -m build && py -m twine upload dist/* --verbose
-
-test:
-    create venv or init existing one
-    pip uninstall sqlalchemy-capture-sql
-    pip install sqlalchemy-capture-sql==0.1.1
-
-    python -c"from sqlalchemy_capture_sql import CaptureSqlStatements"
-
--->

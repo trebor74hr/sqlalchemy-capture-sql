@@ -1,0 +1,75 @@
+test markdown:
+
+    pip install markdown
+    python -m markdown README.md  > r.html && open r.html
+
+markdown syntax: 
+
+    https://www.markdownguide.org/basic-syntax/
+
+Deployment:
+    reference:
+        https://towardsdatascience.com/5-simple-steps-to-package-and-publish-your-python-code-to-pypi-d9f5c43f9d4
+
+Initially:
+
+    pip install wheel
+    py -m pip install --upgrade build
+
+    pip install twine # installs a bunch of thing
+    # bleach-5.0.0 commonmark-0.9.1 docutils-0.18.1 keyring-23.5.0 pkginfo-1.8.2
+    # readme-renderer-34.0 requests-toolbelt-0.9.1 rich-12.2.0 twine-4.0.0
+    # webencodings-0.5.1
+
+    rm -Rf dist/* 
+
+    # build and deploy
+    py -m build
+
+    # deploy on test pypi
+    py -m twine upload --repository testpypi dist/* --verbose
+
+    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    # if ok then install on pypi 
+    py -m twine upload dist/* --verbose
+
+    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    git commit && git push
+
+Upgrade version:
+
+    rm -Rf dist/* 
+
+    # increase version number in setup.cfg
+    # if not done, then upload to pypi will report:
+    #    400 File already exists. See https://pypi.org/help/#file-name-reuse
+    #    for more information.
+
+    py -m twine upload --repository testpypi dist/* --verbose
+
+    # check on https://test.pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    # if ok then upload on pypi
+    py -m twine upload dist/* --verbose
+
+
+    # if ok then install on pypi
+    py -m twine upload --skip-existing dist/*
+
+    # check on: https://pypi.org/project/sqlalchemy-capture-sql/0.1.0/
+
+    git commit && git push
+
+Shortcut:
+
+    rm -Rf dist/* && py -m build && py -m twine upload dist/* --verbose
+
+test:
+    create venv or init existing one
+    pip uninstall sqlalchemy-capture-sql
+    pip install sqlalchemy-capture-sql==0.1.1
+
+    python -c"from sqlalchemy_capture_sql import CaptureSqlStatements"
+
