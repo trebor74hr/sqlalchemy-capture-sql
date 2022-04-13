@@ -5,7 +5,8 @@ TODO: provide some better examples with plain old sql-s w/wo ORM
 import logging
 import sqlite3
 
-from typing import List, Any, Dict, Optional, Callable
+import enum
+from typing import List, Any, Dict, Optional, Callable, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 from collections import Counter
@@ -85,6 +86,7 @@ class SqlStatement:
             out.append(params)
         return " ".join(out)
 
+# ------------------------------------------------------------
 
 @dataclass
 class Stat:
@@ -94,9 +96,18 @@ class Stat:
     statement: Optional[SqlStatement] = None
 
 # ------------------------------------------------------------
+
+class StatName(str, enum.Enum):
+    BY_TYPE           = "by_type"
+    BY_TABLE          = "by_table"
+    BY_TYPE_AND_TABLE = "by_type_and_table"
+
+# ------------------------------------------------------------
+
 TOP_DEFAULT = 20
 TOP_DEFAULT_SLOWEST = 5
 TAB = " " * 4
+
 # ------------------------------------------------------------
 
 @dataclass
@@ -107,9 +118,22 @@ class CaptureSqlStatements:
     started : datetime = field(init=False, default_factory=datetime.now)
     finished : Optional[datetime] = field(init=False, default=None)
     decorated_fn : Callable = field(init=False)
+    connection : sqlite3.Connection = field(init=False)
 
-    AGG_FIELDS = ("cnt", "duration")
-    FMT_MAP    = {"cnt": "%3d", "duration" : "%7.3f s"}
+    AGG_FIELDS = (
+            "cnt", 
+            "duration",
+            )
+    FMT_MAP = {
+            "cnt": "%3d", 
+            "duration" : "%7.3f s",
+            }
+
+    STATS_NAME_MAP = {
+            StatName.BY_TYPE           : "sql_type",
+            StatName.BY_TABLE          : "first_table",
+            StatName.BY_TYPE_AND_TABLE : "sql_type, first_table",
+            }
 
 
     def __post_init__(self):
@@ -117,10 +141,10 @@ class CaptureSqlStatements:
         # https://docs.sqlalchemy.org/en/13/core/events.html?highlight=before_cursor_execute#sqlalchemy.events.ConnectionEvents.before_cursor_execute
         self.decorated_fn = event.listens_for(self.engine, 'before_cursor_execute')\
                                              (self.capture_sa_statement_listener)
-        self._con = sqlite3.connect(":memory:")
-        self._cur = self._con.cursor()
+        self.connection = sqlite3.connect(":memory:")
+        self._cur = self.connection.cursor()
         self._cur.execute("create table sql_statement(id int primary key, duration float, first_table varchar, sql_type varchar)")
-        self._con.commit()
+        self.connection.commit()
 
 
     def __del__(self):
@@ -132,7 +156,7 @@ class CaptureSqlStatements:
 
         if hasattr(self, "_con"):
             try:
-                self._con.close()
+                self.connection.close()
             except:
                 pass
 
@@ -185,7 +209,7 @@ class CaptureSqlStatements:
             for stmt in self.statements:
                 self._cur.execute("insert into sql_statement values (?, ?, ?, ?)",
                                   (stmt.idx, stmt.duration, stmt.first_table, stmt.sql_type))
-            self._con.commit()
+            self.connection.commit()
 
     # ---------------------------------------------------------------------
     # Stats methods - returning aggregated or top records as list or dict
@@ -194,76 +218,78 @@ class CaptureSqlStatements:
     def count(self) -> int:
         return len(self.statements)
 
-    def get_slowest(self, top=TOP_DEFAULT_SLOWEST):
+    def _get_max_key_len(self, stat_list:List[Stat], min_length=15) -> int:
+        return max([min_length, *[len(st.key) for st in stat_list]])
+
+    def get_slowest(self, top:int=TOP_DEFAULT_SLOWEST) -> List[Stat]:
+        " this one fills Stat.statement with original SqlStatement object "
         if not self.finished:
             raise Exception("Call finish() first.")
 
         self._cur.execute(f"select id, sql_type, first_table, duration from sql_statement order by duration desc limit {top}")
-        max_key_len = 15
-        stats = []
+        stat_list = []
         for row in self._cur.fetchall():
-            idx, sql_type, first_table, duration = row
+            row_id, sql_type, first_table, duration = row
             key = f"{sql_type} {first_table}"
-            max_key_len = max([max_key_len, len(key)])
-            stmt = self.statements[idx-1]
-            stats.append(Stat(key, 1, duration, stmt))
-        return max_key_len, stats
+            stmt = self.get_statement_by_row_id(row_id)
+            stat_list.append(Stat(key, 1, duration, stmt))
+        return stat_list
 
-    def get_counts(self, name):
-        return {st.key: st.cnt for st in self.get_stats(name)[1]}
+    def get_statement_by_row_id(self, row_id:int) -> SqlStatement:
+        if row_id <1 or row_id > len(self.statements):
+            raise Exception(f"Row id {row_id} out of range, valid range is: [1, {len(self.statements)}]")
+        return self.statements[row_id-1]
+
+    def get_counts(self, name:StatName) -> Dict[str, int]:
+        return {st.key: st.cnt for st in self.get_stats(name)}
 
 
-    def get_stats(self, name, top=TOP_DEFAULT):
+    def get_stats(self, name: StatName, top:int=TOP_DEFAULT) -> Tuple[int, List[Stat]]:
         if not self.finished:
             # duration is not calculated
             raise Exception("Call finish() first.")
 
-        name_map = {
-            "by_type": "sql_type",
-            "by_table": "first_table",
-            "by_type_and_table": "sql_type, first_table",
-            }
-        if name not in name_map:
+        if name not in self.STATS_NAME_MAP:
             raise Exception(f"Name {name} is not valid, valid are: {name_map.keys()}")
 
-        group_by = name_map[name]
+        group_by = self.STATS_NAME_MAP[name]
 
         self._cur.execute(f"select count(*) cnt, sum(duration) dur, {group_by} from sql_statement group by {group_by} order by sum(duration) desc, count(*) desc limit {top}")
 
-        max_key_len = 15
-        stats = []
+        stat_list = []
         for row in self._cur.fetchall():
             cnt, duration, *keys = row
             key = " ".join(map(str, keys))
-            max_key_len = max([max_key_len, len(key)])
-            stats.append(Stat(key, cnt, duration))
-        return max_key_len, stats
+            stat_list.append(Stat(key, cnt, duration))
+        return stat_list
 
     # ----------------------------------------------------------------------
     # Report methods - using stats method produce report as single string
     # ----------------------------------------------------------------------
 
-    def report_slowest(self, verbose=False):
-        max_key_len, slowest_stmts = self.get_slowest(top=5)
-        fmt = "%%3d. %%-%ds %s %s %%s" % (max_key_len+3, self.FMT_MAP["cnt"], self.FMT_MAP["duration"])
+    def report_slowest(self, verbose=False) -> str:
+        slowest_stat_list = self.get_slowest(top=5)
+        max_key_len = self._get_max_key_len(slowest_stat_list)
+        fmt = "%%3d. %%-%ds %s %s %%s" % (max_key_len, self.FMT_MAP["cnt"], self.FMT_MAP["duration"])
         out = []
-        for nr, stat in enumerate(slowest_stmts,1):
+        for nr, stat in enumerate(slowest_stat_list,1):
             out.append(fmt % (nr, stat.key, stat.cnt, stat.duration, stat.statement.stmt_repr if not verbose else stat.statement))
         return f"\n{TAB}".join(out)
 
-    def report_counter(self, name, top=TOP_DEFAULT):
+    def report_counter(self, name: StatName, top:int=TOP_DEFAULT) -> str:
         return self.report_stats(name, fields=["cnt"], top=top)
 
-    def report_stats(self, name, top=TOP_DEFAULT, fields=AGG_FIELDS):
-        max_key_len, stats = self.get_stats(name)
-        fmt = "%%-%ds " % (max_key_len+3,) + " ".join([self.FMT_MAP[fld] for fld in fields])
-        return f"\n{TAB}".join([fmt % (st.key, *[getattr(st, fld) for fld in fields]) for st in stats])
+    def report_stats(self, name: StatName, top:int=TOP_DEFAULT, fields:List[str]=AGG_FIELDS) -> str:
+        stat_list = self.get_stats(name)
+        max_key_len = self._get_max_key_len(stat_list)
+        fmt = "%%-%ds " % (max_key_len,) + " ".join([self.FMT_MAP[fld] for fld in fields])
+        return f"\n{TAB}".join([fmt % (st.key, *[getattr(st, fld) for fld in fields]) for st in stat_list])
 
     # ----------------------------------------------------------------------
     # Pretty-print method - full report to std. out or custom print function
     # ----------------------------------------------------------------------
 
-    def pp(self, verbose=False, print_cmd=print):
+    def pp(self, verbose:bool=False, print_cmd:Callable=print):
         if self.statements:
             separator_line = "=" * 60
             top = TOP_DEFAULT
@@ -295,7 +321,13 @@ class CaptureSqlStatements:
     # ------------------------------------------------------------
 
     @staticmethod
-    def enable_sqlalchemy_debug_stmts():
-        logging.basicConfig()
+    def sqlalchemy_log_statements_enable():
+        " enable sqlalchemy sql commands logging. One can use SqlAlchemy.Engine(... echo=True) too "
+        # logging.basicConfig()
         logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO) 
+
+    @staticmethod
+    def sqlalchemy_log_statements_disable():
+        # logging.basicConfig()
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING) 
 
